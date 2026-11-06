@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
+<title>Прайм-трекер</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+html,body{margin:0}
+/* Layout: one narrow mobile column — a logbook. Day entry first, progress second, history third. Greys only; ink is the accent. */
+:root{
+  --bg:#EFEFEC;
+  --surface:#FAFAF8;
+  --raised:#FFFFFF;
+  --ink:#1D1D1B;
+  --muted:#71716B;
+  --faint:#A3A39D;
+  --line:#DEDED9;
+  --track:#E3E3DF;
+  --fill:#2B2B29;
+  --fill-soft:#BDBDB7;
+  --ok:#2B2B29;
+  --warn:#8A6A2E;
+  --font-display:"Onest",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-body:"Onest",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-num:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --r:14px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#111110;--surface:#1A1A19;--raised:#21211F;--ink:#ECECE8;--muted:#9A9A94;--faint:#6A6A65;
+  --line:#2C2C2A;--track:#2C2C2A;--fill:#E4E4DF;--fill-soft:#5C5C58;--ok:#E4E4DF;--warn:#C9A564;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111110;--surface:#1A1A19;--raised:#21211F;--ink:#ECECE8;--muted:#9A9A94;--faint:#6A6A65;
+  --line:#2C2C2A;--track:#2C2C2A;--fill:#E4E4DF;--fill-soft:#5C5C58;--ok:#E4E4DF;--warn:#C9A564;color-scheme:dark}
+
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{background:var(--bg)}
+body{color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.45;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 48px}
+.wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1{font-family:var(--font-display);font-weight:800;font-size:28px;letter-spacing:-.02em;margin:0;line-height:1.1;text-wrap:balance}
+h2{font-family:var(--font-display);font-weight:600;font-size:15px;margin:0;letter-spacing:-.005em}
+.num{font-family:var(--font-num);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.eyebrow{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:500}
+button{font:inherit;color:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+header{display:flex;flex-direction:column;gap:10px}
+.counters{display:flex;gap:8px;flex-wrap:wrap}
+.counter{display:flex;align-items:baseline;gap:6px;padding:6px 10px;border:1px solid var(--line);border-radius:999px;font-size:13px;color:var(--muted);background:var(--surface)}
+.counter b{color:var(--ink);font-family:var(--font-num);font-weight:500}
+
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);background:var(--track);border-radius:12px;padding:3px;gap:3px;position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+.tabs button{border:0;background:transparent;padding:9px 4px;border-radius:9px;font-weight:500;font-size:13px;color:var(--muted)}
+.tabs button[aria-selected="true"]{background:var(--raised);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+
+.panel{display:flex;flex-direction:column;gap:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+
+/* day nav */
+.daynav{display:flex;align-items:center;gap:8px}
+.daynav .arrow{width:40px;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--surface);font-size:18px;flex:none}
+.daynav .arrow:disabled{opacity:.35;cursor:default}
+.daynav .label{flex:1;min-width:0;text-align:center}
+.daynav .label strong{display:block;font-family:var(--font-display);font-weight:600;font-size:18px}
+.daynav .label span{font-size:12px;color:var(--muted)}
+.today-btn{border:0;background:none;text-decoration:underline;text-underline-offset:3px;color:var(--muted);font-size:13px;padding:0}
+
+.plan{display:flex;flex-direction:column;gap:6px}
+.plan-row{display:flex;justify-content:space-between;gap:12px;font-size:14px}
+.plan-row span:last-child{font-family:var(--font-num);color:var(--muted)}
+.plan-empty{color:var(--muted);font-size:14px}
+
+/* day score */
+.score{display:flex;align-items:center;gap:16px}
+.score-big{font-family:var(--font-num);font-size:34px;font-weight:500;line-height:1;min-width:84px}
+.score-big small{font-size:14px;color:var(--muted)}
+.segs{flex:1;display:grid;grid-template-columns:repeat(6,1fr);gap:4px;min-width:0}
+.seg{display:flex;flex-direction:column;gap:5px;min-width:0}
+.seg i{display:block;height:8px;border-radius:3px;background:var(--track)}
+.seg.on i{background:var(--fill)}
+.seg span{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* weight */
+.weight{display:flex;align-items:center;gap:10px}
+.weight input{flex:1;min-width:0;text-align:center;font-family:var(--font-num);font-size:30px;font-weight:500;border:1px solid var(--line);background:var(--raised);color:var(--ink);border-radius:12px;padding:8px 6px}
+.step{width:48px;height:52px;border-radius:12px;border:1px solid var(--line);background:var(--raised);font-size:22px;flex:none}
+.weight-meta{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+
+/* toggles */
+.toggles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.toggle{border:1px solid var(--line);background:var(--raised);border-radius:12px;padding:12px 8px;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:13px;font-weight:500;min-width:0}
+.toggle .box{width:22px;height:22px;border-radius:6px;border:1.5px solid var(--faint);display:grid;place-items:center}
+.toggle[aria-pressed="true"]{background:var(--fill);color:var(--bg);border-color:var(--fill)}
+.toggle[aria-pressed="true"] .box{border-color:var(--bg)}
+.toggle[aria-pressed="true"] .box::after{content:"";width:10px;height:6px;border-left:2px solid var(--bg);border-bottom:2px solid var(--bg);transform:translateY(-1px) rotate(-45deg)}
+
+/* number fields */
+.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.field{border:1px solid var(--line);background:var(--raised);border-radius:12px;padding:10px 10px 8px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.field-top{display:flex;justify-content:space-between;align-items:center;gap:6px}
+.field label{font-size:13px;font-weight:500}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--track);flex:none}
+.field.met .dot{background:var(--ok)}
+.field-in{display:flex;align-items:center;gap:4px}
+.field-in input{flex:1;min-width:0;width:100%;border:0;background:transparent;color:var(--ink);font-family:var(--font-num);font-size:20px;padding:2px 0}
+.field-in input::placeholder{color:var(--faint)}
+.mini{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--surface);font-size:16px;flex:none;line-height:1}
+.field-norm{font-size:11px;color:var(--muted)}
+input[type=number]{-moz-appearance:textfield;appearance:textfield}
+input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+
+.times{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.time{border:1px solid var(--line);background:var(--raised);border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.time label{font-size:13px;font-weight:500}
+.time input{border:0;background:transparent;color:var(--ink);font-family:var(--font-num);font-size:22px;padding:2px 0;width:100%;min-width:0}
+.sleep-sum{display:flex;justify-content:space-between;gap:10px;font-size:13px;color:var(--muted)}
+.sleep-sum b{color:var(--ink);font-family:var(--font-num);font-weight:500}
+.status{font-size:12px;color:var(--muted);text-align:center;min-height:18px}
+.status.err{color:var(--warn)}
+.notice{font-size:13px;color:var(--muted);border:1px dashed var(--line);border-radius:12px;padding:10px 12px}
+
+/* progress */
+.kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:4px;min-width:0}
+.kpi b{font-family:var(--font-num);font-weight:500;font-size:22px;line-height:1.1}
+.kpi span{font-size:11px;color:var(--muted)}
+.bars{display:flex;flex-direction:column;gap:14px}
+.bar-row{display:flex;flex-direction:column;gap:6px}
+.bar-head{display:flex;justify-content:space-between;gap:10px;font-size:14px}
+.bar-head span:last-child{font-family:var(--font-num);color:var(--muted);font-size:13px;white-space:nowrap}
+.track{height:10px;border-radius:5px;background:var(--track);position:relative;overflow:hidden}
+.track i{position:absolute;inset:0 auto 0 0;background:var(--fill);border-radius:5px;transition:width .4s ease}
+.track .mark{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--muted);border-radius:1px}
+.hint{font-size:12px;color:var(--muted)}
+.chart{width:100%;height:auto;display:block}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .axis{fill:var(--muted);font-family:var(--font-num);font-size:11px}
+.chart .plan{stroke:var(--faint);stroke-width:1.5;stroke-dasharray:5 4;fill:none}
+.chart .fact{stroke:var(--ink);stroke-width:2;fill:none}
+.chart .pt{fill:var(--ink)}
+.chart .pt-last{fill:var(--bg);stroke:var(--ink);stroke-width:2}
+.chart .area{fill:var(--ink);opacity:.06}
+.chart .barr{fill:var(--fill)}
+.chart .barr.future{fill:var(--track)}
+.chart .val{fill:var(--ink);font-family:var(--font-num);font-size:12px;font-weight:500}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.legend i{display:inline-block;width:14px;height:0;border-top:2px solid var(--ink);vertical-align:middle;margin-right:6px}
+.legend i.d{border-top:2px dashed var(--faint)}
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media (max-width:440px){.two{grid-template-columns:1fr}}
+
+details.card summary{cursor:pointer;font-weight:600;font-family:var(--font-display);list-style:none;display:flex;justify-content:space-between}
+details.card summary::after{content:"+";color:var(--muted);font-weight:400}
+details.card[open] summary::after{content:"−"}
+.goals{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.goals label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.goals input{border:1px solid var(--line);background:var(--raised);color:var(--ink);border-radius:10px;padding:8px 10px;font-family:var(--font-num);font-size:15px;width:100%}
+
+.quit{gap:10px}
+.quit-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.quit-name{font-family:var(--font-display);font-weight:600;font-size:16px;min-width:0;overflow-wrap:anywhere}
+.quit-days{font-family:var(--font-num);font-size:34px;font-weight:500;line-height:1;white-space:nowrap}
+.quit-days small{font-size:14px;color:var(--muted);margin-left:4px}
+.quit-sub{font-size:12px;color:var(--muted)}
+.quit-actions{display:flex;gap:8px;flex-wrap:wrap}
+.qbtn{border:1px solid var(--line);background:var(--raised);border-radius:10px;padding:8px 12px;font-size:13px}
+.qbtn.armed{background:var(--fill);color:var(--bg);border-color:var(--fill)}
+.qbtn.ghost{border-color:transparent;background:none;color:var(--muted)}
+.qform{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:8px}
+@media (max-width:400px){.qform{grid-template-columns:1fr}}
+.qform label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+.qform input{border:1px solid var(--line);background:var(--raised);color:var(--ink);border-radius:10px;padding:9px 10px;font:inherit;font-size:15px;width:100%;min-width:0}
+.primary{border:0;background:var(--fill);color:var(--bg);border-radius:12px;padding:12px;font-weight:600;font-size:15px}
+.primary:disabled{opacity:.4;cursor:default}
+/* history */
+.hist{display:flex;flex-direction:column}
+.hrow{display:grid;grid-template-columns:62px 1fr auto;gap:12px;align-items:center;padding:12px 4px;border:0;border-bottom:1px solid var(--line);background:none;text-align:left;width:100%}
+.hrow:last-child{border-bottom:0}
+.hdate{font-family:var(--font-num);font-size:14px}
+.hdate small{display:block;color:var(--muted);font-size:11px;font-family:var(--font-body)}
+.hinfo{display:flex;flex-direction:column;gap:5px;min-width:0}
+.hchips{display:flex;gap:5px;flex-wrap:wrap}
+.chip{font-size:11px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+.chip.on{background:var(--fill);color:var(--bg);border-color:var(--fill)}
+.hsegs{display:grid;grid-template-columns:repeat(6,1fr);gap:3px;max-width:150px}
+.hsegs i{height:5px;border-radius:2px;background:var(--track)}
+.hsegs i.on{background:var(--fill)}
+.hw{font-family:var(--font-num);font-size:15px;text-align:right}
+.hw small{display:block;color:var(--muted);font-size:11px}
+.empty{padding:24px 8px;text-align:center;color:var(--muted);font-size:14px}
+
+@media (prefers-reduced-motion:reduce){.track i{transition:none}}
+</style>
+</head>
+<body>
+<script>
+(function(){var tg=window.Telegram&&window.Telegram.WebApp;if(!tg||!tg.initData)return;
+function apply(){document.documentElement.setAttribute("data-theme",tg.colorScheme==="dark"?"dark":"light");
+try{var bg=getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();tg.setHeaderColor(bg);tg.setBackgroundColor(bg)}catch(e){}}
+apply();tg.onEvent&&tg.onEvent("themeChanged",apply);})();
+</script>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">−жир · +мышцы · матан</div>
+      <h1>Прайм-трекер</h1>
+    </div>
+    <div class="counters" id="counters"></div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" id="tab-day" aria-selected="true" data-tab="day">День</button>
+    <button role="tab" id="tab-prog" aria-selected="false" data-tab="prog">Прогресс</button>
+    <button role="tab" id="tab-quit" aria-selected="false" data-tab="quit">Отказ</button>
+    <button role="tab" id="tab-hist" aria-selected="false" data-tab="hist">История</button>
+  </nav>
+
+  <!-- DAY -->
+  <section class="panel" id="p-day">
+    <div class="daynav">
+      <button class="arrow" id="prevDay" aria-label="Предыдущий день">‹</button>
+      <div class="label"><strong id="dayTitle">—</strong><span id="daySub"></span></div>
+      <button class="arrow" id="nextDay" aria-label="Следующий день">›</button>
+    </div>
+
+    <div class="card">
+      <div class="eyebrow">По плану</div>
+      <div class="plan" id="plan"></div>
+    </div>
+
+    <div class="card">
+      <div class="score">
+        <div class="score-big" id="scoreBig">—</div>
+        <div class="segs" id="segs"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="field-top"><h2>Вес утром</h2><span class="hint" id="wHint"></span></div>
+      <div class="weight">
+        <button class="step" id="wMinus" aria-label="Минус 0,1 кг">−</button>
+        <input id="weight" type="number" inputmode="decimal" step="0.1" placeholder="—" aria-label="Вес, кг">
+        <button class="step" id="wPlus" aria-label="Плюс 0,1 кг">+</button>
+      </div>
+      <div class="weight-meta"><span id="wPlan"></span><span id="wDelta"></span></div>
+    </div>
+
+    <div class="card">
+      <div class="field-top"><h2>Сон</h2><span class="hint">поле «Сон, ч» считается само</span></div>
+      <div class="times">
+        <div class="time"><label for="bed">Лёг спать</label><input id="bed" type="time"></div>
+        <div class="time"><label for="wake">Встал</label><input id="wake" type="time"></div>
+      </div>
+      <div class="sleep-sum"><span id="sleepCalc">Укажи оба времени — посчитаю часы сна</span><span id="sleepNorm"></span></div>
+    </div>
+
+    <div class="toggles" id="toggles"></div>
+    <div class="fields" id="fields"></div>
+    <div class="status" id="status"></div>
+    <div class="notice" id="localNote" hidden>Трекер открыт не в Телеграме, поэтому данные сохраняются только в этом браузере. Открой его кнопкой в боте — тогда всё будет храниться в твоём Телеграме.</div>
+  </section>
+
+  <!-- PROGRESS -->
+  <section class="panel" id="p-prog" hidden>
+    <div class="kpis" id="kpis"></div>
+    <div class="card">
+      <h2>Шкалы</h2>
+      <div class="bars" id="bars"></div>
+      <div class="hint">Серая риска на шкале веса — где ты должен быть сегодня по плану.</div>
+    </div>
+    <div class="card">
+      <div class="field-top"><h2>Вес: факт и план</h2><span class="hint">кг</span></div>
+      <svg class="chart" id="wChart" viewBox="0 0 400 210" role="img" aria-label="График веса"></svg>
+      <div class="legend"><span><i></i>факт</span><span><i class="d"></i>план до цели</span></div>
+    </div>
+    <div class="two">
+      <div class="card">
+        <h2>Тренировки по неделям</h2>
+        <svg class="chart" id="tChart" viewBox="0 0 260 130" role="img" aria-label="Тренировки по неделям"></svg>
+      </div>
+      <div class="card">
+        <h2>Матан по неделям, ч</h2>
+        <svg class="chart" id="mChart" viewBox="0 0 260 130" role="img" aria-label="Часы матана по неделям"></svg>
+      </div>
+    </div>
+    <details class="card" id="goalsBox">
+      <summary>Цели и нормы</summary>
+      <div class="goals" id="goals"></div>
+      <div class="hint">Меняешь число — шкалы и нормы пересчитываются сразу.</div>
+    </details>
+  </section>
+
+  <!-- QUIT -->
+  <section class="panel" id="p-quit" hidden>
+    <div class="panel" id="quitList"></div>
+    <div class="card">
+      <h2>Добавить привычку</h2>
+      <div class="qform">
+        <label for="qName">Привычка<input id="qName" type="text" maxlength="40" placeholder="например, энергетики"></label>
+        <label for="qSince">Не занимаюсь с<input id="qSince" type="date"></label>
+      </div>
+      <button class="primary" id="qAdd" disabled>Добавить</button>
+      <div class="hint">Если бросил раньше, поставь ту дату: дни посчитаются с неё.</div>
+    </div>
+  </section>
+
+  <!-- HISTORY -->
+  <section class="panel" id="p-hist" hidden>
+    <div class="card"><div class="hist" id="hist"></div></div>
+  </section>
+</div>
+<script>
+(function(){
+"use strict";
+const START="2026-11-07", END="2026-12-20", EXAM="2026-11-16", WEEK0="2026-11-02";
+const DEFAULTS={start:88.5,goal:83.5,steps:8000,sleep:7,water:2.5,protein:150,kcal:2500,wplan:24,mplan:7};
+const LS_KEY="prime-tracker-v1";
+const WD=["Вс","Пн","Вт","Ср","Чт","Пт","Сб"];
+const WDF=["воскресенье","понедельник","вторник","среда","четверг","пятница","суббота"];
+const MON=["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+
+let settings={...DEFAULTS};
+let days={};
+let quits=[];
+let store=null, col=null;
+const TG=window.Telegram&&window.Telegram.WebApp&&window.Telegram.WebApp.initData?window.Telegram.WebApp:null;
+function haptic(){try{TG&&TG.HapticFeedback&&TG.HapticFeedback.selectionChanged()}catch(e){}}
+function cloudSet(key,obj){return new Promise((res,rej)=>{try{col.setItem(key,JSON.stringify(obj),(err,ok)=>err?rej({code:"cloud",message:String(err)}):res())}catch(e){rej({code:"cloud"})}})}
+const pending=new Map(), chains=new Map();
+let current=todayKey();
+
+/* ---------- dates ---------- */
+function pad(n){return String(n).padStart(2,"0")}
+function keyOf(d){return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())}
+function parse(k){const [y,m,d]=k.split("-").map(Number);return new Date(y,m-1,d)}
+function todayKey(){return keyOf(new Date())}
+function addDays(k,n){const d=parse(k);d.setDate(d.getDate()+n);return keyOf(d)}
+function diffDays(a,b){return Math.round((parse(b)-parse(a))/864e5)}
+function ddmm(k){const d=parse(k);return pad(d.getDate())+"."+pad(d.getMonth()+1)}
+function fmt(n,dec){if(n==null||isNaN(n))return"—";return Number(n).toLocaleString("ru-RU",{minimumFractionDigits:dec||0,maximumFractionDigits:dec||0})}
+function clamp(x){return Math.max(0,Math.min(1,x))}
+
+/* ---------- plan from the calendar ---------- */
+function planFor(k){
+  const out=[]; if(k<START||k>END) return out;
+  const d=parse(k), wd=d.getDay(), w=Math.floor(diffDays(WEEK0,k)/7), odd=w%2===0;
+  if(k>="2026-11-09"){
+    if(wd===1) out.push(["Верх A + кардио",odd?"21:30":"14:55"]);
+    if(wd===2) out.push(["Ноги + кардио","21:30"]);
+    if(wd===3) out.push(["Верх B + кардио",odd?"09:00":"13:10"]);
+    if(wd===5) out.push(["Верх C + кардио",odd?"21:30":"14:55"]);
+  }
+  if(wd===6) out.push(["Кардио",k===START?"21:30":"14:55"]);
+  if(k>="2026-11-09"&&k<="2026-11-15") out.push(["Подготовка к матану","по календарю"]);
+  if(k===EXAM) out.push(["Экзамен по матану","удачи"]);
+  return out;
+}
+
+/* ---------- scoring ---------- */
+const NORMS=[
+  {k:"steps",label:"Шаги",ok:(v,s)=>v>=s.steps},
+  {k:"sleep",label:"Сон",ok:(v,s)=>v>=s.sleep},
+  {k:"water",label:"Вода",ok:(v,s)=>v>=s.water},
+  {k:"protein",label:"Белок",ok:(v,s)=>v>=s.protein},
+  {k:"kcal",label:"Ккал",ok:(v,s)=>v>0&&v<=s.kcal},
+  {k:"nosweet",label:"Сладкое",ok:v=>v===1}
+];
+const ALLKEYS=["weight","training","cardio","nosweet","steps","sleep","water","protein","kcal","matan"];
+function isNum(v){return typeof v==="number"&&!isNaN(v)}
+function sleepHours(bed,wake){if(!bed||!wake)return null;const [bh,bm]=bed.split(":").map(Number),[wh,wm]=wake.split(":").map(Number);let m=(wh*60+wm)-(bh*60+bm);if(m<=0)m+=1440;return Math.round(m/60*4)/4}
+function hasData(day){return !!day&&(ALLKEYS.some(k=>isNum(day[k]))||!!day.bed||!!day.wake)}
+function metList(day){return NORMS.map(n=>!!day&&isNum(day[n.k])&&n.ok(day[n.k],settings))}
+function score(day){if(!hasData(day))return null;return metList(day).filter(Boolean).length/6}
+
+/* ---------- storage ---------- */
+function lsRead(){try{const raw=localStorage.getItem(LS_KEY);return raw?JSON.parse(raw):null}catch(e){return null}}
+function lsWrite(){try{localStorage.setItem(LS_KEY,JSON.stringify({days,settings,quits}))}catch(e){}}
+function setStatus(t,err){const s=$("status");s.textContent=t;s.classList.toggle("err",!!err)}
+
+function queueWrite(docId,dataFn){
+  const prev=chains.get(docId)||Promise.resolve();
+  const next=prev.then(()=>cloudSet(docId,dataFn())).then(()=>{
+    if(chains.get(docId)===next){pending.delete(docId);setStatus("Сохранено")}
+  }).catch(e=>{
+    pending.delete(docId);
+    if(e&&e.code==="quota_exceeded") setStatus("Хранилище заполнено, запись не сохранилась",true);
+    else setStatus("Не сохранилось. Проверь интернет и поменяй значение ещё раз",true);
+  });
+  chains.set(docId,next);
+}
+const timers=new Map();
+function scheduleSave(docId,dataFn){
+  pending.set(docId,true);
+  setStatus("Сохраняю…");
+  clearTimeout(timers.get(docId));
+  timers.set(docId,setTimeout(()=>{
+    if(col) queueWrite(docId,dataFn);
+    else{lsWrite();pending.delete(docId);setStatus("Сохранено в этом браузере")}
+    if(col) lsWrite();
+  },700));
+}
+function saveDay(k){scheduleSave("d-"+k,()=>({...days[k],date:k}))}
+function saveSettings(){scheduleSave("settings",()=>({...settings}))}
+
+/* ---------- helpers ---------- */
+function $(id){return document.getElementById(id)}
+function el(tag,attrs,kids){const e=document.createElement(tag);if(attrs)for(const a in attrs){if(a==="text")e.textContent=attrs[a];else if(a==="class")e.className=attrs[a];else e.setAttribute(a,attrs[a])}(kids||[]).forEach(c=>e.appendChild(c));return e}
+function svgEl(tag,attrs,text){const e=document.createElementNS("http://www.w3.org/2000/svg",tag);for(const a in attrs)e.setAttribute(a,attrs[a]);if(text!=null)e.textContent=text;return e}
+function dayObj(k){return days[k]||{}}
+function setField(k,field,val){
+  const d={...dayObj(k)};
+  if(val===null||val===""||(typeof val==="number"&&isNaN(val))) delete d[field]; else d[field]=val;
+  days[k]=d; saveDay(k); renderDayDynamic(); renderCounters();
+}
+function lastWeight(){
+  const ks=Object.keys(days).sort();let w=null,wk=null;
+  ks.forEach(k=>{if(isNum(days[k].weight)){w=days[k].weight;wk=k}});
+  return {w,wk};
+}
+function planWeight(k){const t=clamp(diffDays(START,k)/diffDays(START,END));return settings.start-(settings.start-settings.goal)*t}
+
+/* ---------- counters ---------- */
+function renderCounters(){
+  const t=todayKey();
+  const c=$("counters");c.textContent="";
+  const add=(label,val)=>c.appendChild(el("div",{class:"counter"},[document.createTextNode(label),el("b",{text:val})]));
+  add("до 20 декабря",Math.max(0,diffDays(t,END))+" дн.");
+  const ex=diffDays(t,EXAM);
+  if(ex>=0) add("до экзамена",ex===0?"сегодня":ex+" дн.");
+  const {w}=lastWeight();
+  if(w!=null) add("сброшено",(settings.start-w>=0?"−":"+")+fmt(Math.abs(settings.start-w),1)+" кг");
+}
+
+/* ---------- DAY ---------- */
+const TOGGLES=[{k:"training",label:"Тренировка"},{k:"cardio",label:"Кардио"},{k:"nosweet",label:"Без сладкого"}];
+const FIELDS=[
+  {k:"steps",label:"Шаги",step:500,dec:0,norm:()=>"норма от "+fmt(settings.steps)},
+  {k:"sleep",label:"Сон, ч",step:0.5,dec:1,norm:()=>"норма от "+fmt(settings.sleep,1)},
+  {k:"water",label:"Вода, л",step:0.25,dec:2,norm:()=>"норма от "+fmt(settings.water,1)},
+  {k:"protein",label:"Белок, г",step:10,dec:0,norm:()=>"норма от "+fmt(settings.protein)},
+  {k:"kcal",label:"Калории",step:50,dec:0,norm:()=>"норма до "+fmt(settings.kcal)},
+  {k:"matan",label:"Матан, ч",step:0.5,dec:1,norm:()=>"часы подготовки"}
+];
+function buildDay(){
+  const tg=$("toggles");
+  TOGGLES.forEach(t=>{
+    const b=el("button",{class:"toggle",id:"tg-"+t.k,"aria-pressed":"false"},[el("span",{class:"box"}),el("span",{text:t.label})]);
+    b.addEventListener("click",()=>{haptic();const on=dayObj(current)[t.k]===1;setField(current,t.k,on?0:1)});
+    tg.appendChild(b);
+  });
+  const fl=$("fields");
+  FIELDS.forEach(f=>{
+    const inp=el("input",{id:"f-"+f.k,type:"number",inputmode:"decimal",step:String(f.step),placeholder:"—","aria-label":f.label});
+    const minus=el("button",{class:"mini","aria-label":f.label+" меньше",text:"−"});
+    const plus=el("button",{class:"mini","aria-label":f.label+" больше",text:"+"});
+    const box=el("div",{class:"field",id:"fb-"+f.k},[
+      el("div",{class:"field-top"},[el("label",{for:"f-"+f.k,text:f.label}),el("span",{class:"dot"})]),
+      el("div",{class:"field-in"},[minus,inp,plus]),
+      el("div",{class:"field-norm",id:"fn-"+f.k})
+    ]);
+    inp.addEventListener("input",()=>{const v=inp.value===""?null:parseFloat(inp.value.replace(",","."));setField(current,f.k,v)});
+    const bump=dir=>{const cur=dayObj(current)[f.k];let v=(isNum(cur)?cur:0)+dir*f.step;v=Math.max(0,Math.round(v*100)/100);inp.value=v;setField(current,f.k,v)};
+    minus.addEventListener("click",()=>bump(-1));plus.addEventListener("click",()=>bump(1));
+    fl.appendChild(box);
+  });
+  ["bed","wake"].forEach(id=>{
+    const inp=$(id);
+    inp.addEventListener("change",()=>{
+      const d={...dayObj(current)};
+      if(inp.value) d[id]=inp.value; else delete d[id];
+      const h=sleepHours(d.bed,d.wake);
+      if(h!=null){d.sleep=h;const si=$("f-sleep");if(si)si.value=h}
+      days[current]=d;saveDay(current);renderDayDynamic();renderCounters();
+    });
+  });
+  const w=$("weight");
+  w.addEventListener("input",()=>{const v=w.value===""?null:parseFloat(w.value.replace(",","."));setField(current,"weight",v)});
+  const wb=dir=>{const cur=dayObj(current).weight;const base=isNum(cur)?cur:(lastWeight().w??settings.start);const v=Math.round((base+dir*0.1)*10)/10;w.value=v.toFixed(1);setField(current,"weight",v)};
+  $("wMinus").addEventListener("click",()=>wb(-1));$("wPlus").addEventListener("click",()=>wb(1));
+  $("prevDay").addEventListener("click",()=>{current=addDays(current,-1);renderDayAll()});
+  $("nextDay").addEventListener("click",()=>{current=addDays(current,1);renderDayAll()});
+  const segs=$("segs");
+  NORMS.forEach((n,i)=>segs.appendChild(el("div",{class:"seg",id:"sg-"+i},[el("i"),el("span",{text:n.label})])));
+}
+function renderDayAll(){
+  const d=parse(current),t=todayKey();
+  $("dayTitle").textContent=WD[d.getDay()]+", "+d.getDate()+" "+MON[d.getMonth()];
+  const sub=$("daySub");sub.textContent="";
+  if(current===t) sub.textContent="сегодня";
+  else{
+    const btn=el("button",{class:"today-btn",text:"вернуться к сегодня"});
+    btn.addEventListener("click",()=>{current=todayKey();renderDayAll()});
+    sub.appendChild(btn);
+  }
+  $("nextDay").disabled=current>=t;
+  const plan=$("plan");plan.textContent="";
+  const items=planFor(current);
+  if(!items.length) plan.appendChild(el("div",{class:"plan-empty",text:current<"2026-11-09"&&current>=START?"Свободный день, отдых":"Отдых: силовых по плану нет"}));
+  items.forEach(([a,b])=>plan.appendChild(el("div",{class:"plan-row"},[el("span",{text:a}),el("span",{text:b})])));
+  syncInputs(true);
+  renderDayDynamic();
+}
+function syncInputs(force){
+  const day=dayObj(current), act=document.activeElement;
+  const w=$("weight");
+  if(force||act!==w) w.value=isNum(day.weight)?day.weight.toFixed(1):"";
+  FIELDS.forEach(f=>{const i=$("f-"+f.k);if(force||act!==i) i.value=isNum(day[f.k])?day[f.k]:""});
+  ["bed","wake"].forEach(id=>{const i=$(id);if(force||act!==i) i.value=day[id]||""});
+}
+function renderDayDynamic(){
+  const day=dayObj(current), met=metList(day), sc=score(day);
+  TOGGLES.forEach(t=>$("tg-"+t.k).setAttribute("aria-pressed",day[t.k]===1?"true":"false"));
+  FIELDS.forEach(f=>{
+    $("fn-"+f.k).textContent=f.norm();
+    const n=NORMS.find(x=>x.k===f.k);
+    $("fb-"+f.k).classList.toggle("met",!!n&&isNum(day[f.k])&&n.ok(day[f.k],settings));
+  });
+  NORMS.forEach((n,i)=>$("sg-"+i).classList.toggle("on",met[i]));
+  const big=$("scoreBig");big.textContent="";
+  if(sc==null){big.appendChild(document.createTextNode("—"))}
+  else{big.appendChild(document.createTextNode(Math.round(sc*100)));big.appendChild(el("small",{text:"%"}))}
+  const sh=sleepHours(day.bed,day.wake);
+  $("sleepCalc").textContent=sh!=null?"":"Укажи оба времени — посчитаю часы сна";
+  if(sh!=null){$("sleepCalc").append("Спал ",Object.assign(document.createElement("b"),{textContent:fmt(sh,2).replace(/,?0+$/,"")+" ч"}))}
+  $("sleepNorm").textContent=sh!=null?(sh>=settings.sleep?"норма есть":"до нормы "+fmt(settings.sleep-sh,1)+" ч"):"";
+  const pw=planWeight(current);
+  $("wPlan").textContent=current>=START&&current<=END?"по плану "+fmt(pw,1)+" кг":"";
+  const {w}=lastWeight();
+  $("wHint").textContent=w!=null?"последний: "+fmt(w,1)+" кг":"старт: "+fmt(settings.start,1)+" кг";
+  $("wDelta").textContent=isNum(day.weight)&&current>=START&&current<=END?(day.weight-pw<=0?"в графике":"+"+fmt(day.weight-pw,1)+" кг к плану"):"";
+}
+
+/* ---------- PROGRESS ---------- */
+function renderProgress(){
+  const t=todayKey(), {w,wk}=lastWeight();
+  const cur=w??settings.start, lost=settings.start-cur;
+  const k=$("kpis");k.textContent="";
+  const kpi=(val,lab)=>k.appendChild(el("div",{class:"kpi"},[el("b",{text:val}),el("span",{text:lab})]));
+  kpi(fmt(cur,1),wk?"вес на "+ddmm(wk):"стартовый вес");
+  kpi((lost>=0?"−":"+")+fmt(Math.abs(lost),1),"кг с начала");
+  kpi(fmt(Math.max(0,cur-settings.goal),1),"кг до цели");
+
+  const ks=Object.keys(days);
+  const trainings=ks.filter(x=>days[x].training===1).length;
+  const matanDays=ks.filter(x=>isNum(days[x].matan)&&days[x].matan>0).length;
+  const matanH=ks.reduce((s,x)=>s+(isNum(days[x].matan)?days[x].matan:0),0);
+  const scores=ks.map(x=>score(days[x])).filter(x=>x!=null);
+  const avg=scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:0;
+  const timeP=clamp(diffDays(START,t)/diffDays(START,END));
+  let streak=0;{let d=hasData(days[t])?t:addDays(t,-1);while(score(days[d])!=null&&score(days[d])>=4/6){streak++;d=addDays(d,-1)}}
+
+  const bars=$("bars");bars.textContent="";
+  const bar=(label,p,right,mark)=>{
+    const tr=el("div",{class:"track"},[el("i",{style:"width:"+Math.round(clamp(p)*100)+"%"})]);
+    if(mark!=null) tr.appendChild(el("span",{class:"mark",style:"left:calc("+Math.round(clamp(mark)*100)+"% - 1px)"}));
+    bars.appendChild(el("div",{class:"bar-row"},[el("div",{class:"bar-head"},[el("span",{text:label}),el("span",{text:right})]),tr]));
+  };
+  const span=settings.start-settings.goal;
+  bar("Вес → цель",span>0?lost/span:0,fmt(Math.max(0,lost),1)+" из "+fmt(span,1)+" кг",span>0?(settings.start-planWeight(t))/span:null);
+  bar("Тренировки",trainings/settings.wplan,trainings+" из "+settings.wplan);
+  bar("Дни подготовки к матану",matanDays/settings.mplan,matanDays+" из "+settings.mplan+" · "+fmt(matanH,1)+" ч");
+  bar("Срок до 20 декабря",timeP,Math.max(0,Math.min(diffDays(START,t),diffDays(START,END)))+" из "+diffDays(START,END)+" дн.");
+  bar("Нормы дня в среднем",avg,Math.round(avg*100)+"% · серия "+streak+" дн.");
+
+  drawWeight();
+  const weeks=[];for(let i=0;i<7;i++){const s=addDays(WEEK0,i*7);weeks.push({s,e:addDays(s,6),lab:ddmm(s)})}
+  const sumWeek=(f)=>weeks.map(wk=>Object.keys(days).filter(x=>x>=wk.s&&x<=wk.e).reduce((a,x)=>a+(isNum(days[x][f])?days[x][f]:0),0));
+  drawBars($("tChart"),sumWeek("training"),weeks,4,0);
+  drawBars($("mChart"),sumWeek("matan"),weeks,10,1);
+  renderGoals();
+}
+function drawWeight(){
+  const svg=$("wChart");svg.textContent="";
+  const W=400,H=210,L=30,R=10,T=12,B=24;
+  const pts=Object.keys(days).filter(k=>isNum(days[k].weight)&&k>=START&&k<=END).sort().map(k=>[k,days[k].weight]);
+  const vals=pts.map(p=>p[1]).concat([settings.start,settings.goal]);
+  let lo=Math.floor(Math.min(...vals)-0.5),hi=Math.ceil(Math.max(...vals)+0.5);
+  const n=diffDays(START,END);
+  const x=k=>L+(W-L-R)*diffDays(START,k)/n, y=v=>T+(H-T-B)*(hi-v)/(hi-lo);
+  const stepY=(hi-lo)>8?2:1;
+  for(let v=lo;v<=hi;v+=stepY){svg.appendChild(svgEl("line",{class:"grid",x1:L,x2:W-R,y1:y(v),y2:y(v)}));svg.appendChild(svgEl("text",{class:"axis",x:L-6,y:y(v)+3,"text-anchor":"end"},v))}
+  for(let i=0;i<=n-5;i+=7){const k=addDays(START,i);svg.appendChild(svgEl("text",{class:"axis",x:x(k),y:H-8,"text-anchor":i===0?"start":"middle"},ddmm(k)))}
+  svg.appendChild(svgEl("text",{class:"axis",x:W-R,y:H-8,"text-anchor":"end"},ddmm(END)));
+  svg.appendChild(svgEl("line",{class:"plan",x1:x(START),y1:y(settings.start),x2:x(END),y2:y(settings.goal)}));
+  if(pts.length){
+    const d=pts.map((p,i)=>(i?"L":"M")+x(p[0]).toFixed(1)+" "+y(p[1]).toFixed(1)).join(" ");
+    if(pts.length>1) svg.appendChild(svgEl("path",{class:"area",d:d+" L"+x(pts[pts.length-1][0]).toFixed(1)+" "+(H-B)+" L"+x(pts[0][0]).toFixed(1)+" "+(H-B)+" Z"}));
+    svg.appendChild(svgEl("path",{class:"fact",d}));
+    pts.forEach((p,i)=>{const last=i===pts.length-1;svg.appendChild(svgEl("circle",{class:last?"pt-last":"pt",cx:x(p[0]),cy:y(p[1]),r:last?4.5:2.5}))});
+    const lp=pts[pts.length-1];const lx=x(lp[0]);
+    svg.appendChild(svgEl("text",{class:"val",x:Math.min(lx+8,W-R-30),y:y(lp[1])-8},fmt(lp[1],1)));
+  }else{
+    svg.appendChild(svgEl("text",{class:"axis",x:(L+W-R)/2,y:H/2,"text-anchor":"middle"},"Внеси вес на вкладке «День» — здесь появится линия"));
+  }
+}
+function drawBars(svg,vals,weeks,minMax,dec){
+  svg.textContent="";
+  const W=260,H=130,L=6,R=6,T=16,B=22,t=todayKey();
+  const max=Math.max(minMax,...vals);
+  const bw=(W-L-R)/vals.length;
+  svg.appendChild(svgEl("line",{class:"grid",x1:L,x2:W-R,y1:H-B,y2:H-B}));
+  vals.forEach((v,i)=>{
+    const h=(H-T-B)*v/max, bx=L+i*bw+bw*0.18, w=bw*0.64;
+    const future=weeks[i].s>t;
+    svg.appendChild(svgEl("rect",{class:"barr"+(future?" future":""),x:bx,y:H-B-Math.max(h,future?2:(v>0?h:2)),width:w,height:Math.max(h,2),rx:3}));
+    if(v>0) svg.appendChild(svgEl("text",{class:"val",x:bx+w/2,y:H-B-h-4,"text-anchor":"middle"},fmt(v,dec)));
+    svg.appendChild(svgEl("text",{class:"axis",x:bx+w/2,y:H-6,"text-anchor":"middle"},weeks[i].lab));
+  });
+}
+const GOALS=[
+  ["start","Стартовый вес, кг",0.1],["goal","Цель, кг",0.1],["steps","Шаги в день",500],["sleep","Сон, ч",0.5],
+  ["water","Вода, л",0.25],["protein","Белок, г",10],["kcal","Калории, не больше",50],["wplan","Тренировок по плану",1],["mplan","Дней подготовки к матану",1]
+];
+let goalsBuilt=false;
+function renderGoals(){
+  const g=$("goals");
+  if(!goalsBuilt){
+    GOALS.forEach(([k,lab,st])=>{
+      const inp=el("input",{id:"g-"+k,type:"number",inputmode:"decimal",step:String(st)});
+      inp.addEventListener("input",()=>{const v=parseFloat(inp.value.replace(",","."));if(!isNaN(v)&&v>0){settings[k]=v;saveSettings();renderCounters();renderProgressSoft()}});
+      g.appendChild(el("label",{for:"g-"+k},[document.createTextNode(lab),inp]));
+    });
+    goalsBuilt=true;
+  }
+  GOALS.forEach(([k])=>{const i=$("g-"+k);if(document.activeElement!==i) i.value=settings[k]});
+}
+let softT=null;
+function renderProgressSoft(){clearTimeout(softT);softT=setTimeout(()=>{if(!$("p-prog").hidden)renderProgress()},250)}
+
+/* ---------- HISTORY ---------- */
+function renderHistory(){
+  const h=$("hist");h.textContent="";
+  const ks=Object.keys(days).filter(k=>hasData(days[k])).sort().reverse();
+  if(!ks.length){h.appendChild(el("div",{class:"empty",text:"Пока пусто. Заполни сегодняшний день на вкладке «День» — он появится здесь."}));return}
+  ks.forEach(k=>{
+    const d=days[k], dt=parse(k), met=metList(d);
+    const chips=el("div",{class:"hchips"});
+    TOGGLES.forEach(t=>chips.appendChild(el("span",{class:"chip"+(d[t.k]===1?" on":""),text:t.label})));
+    if(d.bed||d.wake) chips.appendChild(el("span",{class:"chip",text:(d.bed||"—")+" → "+(d.wake||"—")}));
+    if(isNum(d.matan)&&d.matan>0) chips.appendChild(el("span",{class:"chip on",text:"матан "+fmt(d.matan,1)+" ч"}));
+    const segs=el("div",{class:"hsegs"});met.forEach(m=>segs.appendChild(el("i",{class:m?"on":""})));
+    const sc=score(d);
+    const row=el("button",{class:"hrow"},[
+      el("div",{class:"hdate"},[document.createTextNode(ddmm(k)),el("small",{text:WDF[dt.getDay()]})]),
+      el("div",{class:"hinfo"},[chips,segs]),
+      el("div",{class:"hw"},[document.createTextNode(isNum(d.weight)?fmt(d.weight,1):"—"),el("small",{text:sc==null?"":Math.round(sc*100)+"%"})])
+    ]);
+    row.addEventListener("click",()=>{current=k;showTab("day");renderDayAll()});
+    h.appendChild(row);
+  });
+}
+
+
+/* ---------- QUIT ---------- */
+const MILES=[1,3,7,14,21,30,60,90,180,365,730];
+function plural(n,a,b,c){const m10=n%10,m100=n%100;if(m10===1&&m100!==11)return a;if(m10>=2&&m10<=4&&(m100<12||m100>14))return b;return c}
+function saveQuits(){scheduleSave("quits",()=>({items:quits}))}
+const armed={};
+function arm(btn,key,label,armedLabel,action){
+  btn.addEventListener("click",()=>{
+    if(armed[key]){clearTimeout(armed[key]);delete armed[key];action();return}
+    btn.textContent=armedLabel;btn.classList.add("armed");
+    armed[key]=setTimeout(()=>{delete armed[key];btn.textContent=label;btn.classList.remove("armed")},4000);
+  });
+}
+function renderQuits(){
+  const box=$("quitList");box.textContent="";
+  const t=todayKey();
+  if(!quits.length){box.appendChild(el("div",{class:"card"},[el("div",{class:"empty",text:"Пока пусто. Добавь привычку, от которой отказываешься, например сладкое, энергетики или залипание в телефоне."})]));return}
+  quits.slice().sort((a,b)=>a.since<b.since?-1:1).forEach(q=>{
+    const days=Math.max(0,diffDays(q.since,t));
+    const best=Math.max(q.best||0,days);
+    const next=MILES.find(m=>m>days)||(Math.ceil((days+1)/365)*365);
+    const prev=[0].concat(MILES).filter(m=>m<=days).pop()||0;
+    const p=(days-prev)/(next-prev);
+    const big=el("div",{class:"quit-days"},[document.createTextNode(days),el("small",{text:plural(days,"день","дня","дней")})]);
+    const sub=el("div",{class:"quit-sub",text:(days===0?"первый день · ":"")+"с "+ddmm(q.since)+" · рекорд "+best+" "+plural(best,"день","дня","дней")+(q.resets?" · срывов "+q.resets:"")});
+    const head=el("div",{class:"quit-top"},[el("div",{style:"display:flex;flex-direction:column;gap:4px;min-width:0"},[el("div",{class:"quit-name",text:q.name}),sub]),big]);
+    const tr=el("div",{class:"track"},[el("i",{style:"width:"+Math.round(clamp(p)*100)+"%"})]);
+    const goal=el("div",{class:"bar-head"},[el("span",{class:"hint",text:"следующая отметка: "+next+" "+plural(next,"день","дня","дней")}),el("span",{text:"ещё "+(next-days)})]);
+    const reset=el("button",{class:"qbtn",text:"Сорвался"});
+    const del=el("button",{class:"qbtn ghost",text:"Удалить"});
+    arm(reset,"r"+q.id,"Сорвался","Сбросить счётчик?",()=>{q.best=best;q.resets=(q.resets||0)+1;q.since=todayKey();saveQuits();renderQuits()});
+    arm(del,"d"+q.id,"Удалить","Точно удалить?",()=>{quits=quits.filter(x=>x.id!==q.id);saveQuits();renderQuits()});
+    box.appendChild(el("div",{class:"card quit"},[head,el("div",{class:"bar-row"},[goal,tr]),el("div",{class:"quit-actions"},[reset,del])]));
+  });
+}
+(function buildQuitForm(){
+  const n=$("qName"),d=$("qSince"),b=$("qAdd");
+  d.value=todayKey();d.max=todayKey();
+  n.addEventListener("input",()=>{b.disabled=!n.value.trim()});
+  b.addEventListener("click",()=>{
+    const name=n.value.trim();if(!name)return;
+    const since=d.value&&d.value<=todayKey()?d.value:todayKey();
+    quits.push({id:Date.now().toString(36),name,since,best:0,resets:0});
+    n.value="";d.value=todayKey();b.disabled=true;saveQuits();renderQuits();
+  });
+})();
+
+/* ---------- tabs ---------- */
+function showTab(name){
+  document.querySelectorAll(".tabs button").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===name?"true":"false"));
+  $("p-day").hidden=name!=="day";$("p-prog").hidden=name!=="prog";$("p-hist").hidden=name!=="hist";$("p-quit").hidden=name!=="quit";
+  if(name==="quit") renderQuits();
+  if(name==="prog") renderProgress();
+  if(name==="hist") renderHistory();
+}
+document.querySelectorAll(".tabs button").forEach(b=>b.addEventListener("click",()=>showTab(b.dataset.tab)));
+
+function renderAll(){
+  renderCounters();
+  syncInputs(false);renderDayDynamic();
+  if(!$("p-prog").hidden) renderProgress();
+  if(!$("p-hist").hidden) renderHistory();
+  if(!$("p-quit").hidden) renderQuits();
+}
+
+/* ---------- boot ---------- */
+buildDay();
+const local=lsRead();
+if(local){days=local.days||{};settings={...DEFAULTS,...(local.settings||{})};quits=Array.isArray(local.quits)?local.quits:[]}
+renderDayAll();renderCounters();
+setStatus("Подключаю хранилище…");
+
+let loadTimer=setTimeout(()=>{setStatus("Хранилище пока не отвечает — можно вносить данные, они сохранятся, когда связь появится",true)},10000);
+
+(function connect(){
+  if(!TG){fallback();return}
+  try{TG.ready();TG.expand()}catch(e){}
+  try{const bg=getComputedStyle(document.documentElement).getPropertyValue("--bg").trim();TG.setHeaderColor(bg);TG.setBackgroundColor(bg)}catch(e){}
+  if(!TG.CloudStorage||!TG.isVersionAtLeast||!TG.isVersionAtLeast("6.9")){fallback();return}
+  col=TG.CloudStorage;
+  col.getKeys((err,keys)=>{
+    if(err){fallback();return}
+    keys=(keys||[]).filter(k=>k==="settings"||k==="quits"||k.startsWith("d-"));
+    const apply=(vals)=>{
+      clearTimeout(loadTimer);setStatus("");
+      const next={};let s=null,q=null;
+      Object.keys(vals).forEach(k=>{let data=null;try{data=JSON.parse(vals[k])}catch(e){}if(!data)return;
+        if(k==="settings") s=data; else if(k==="quits") q=data; else {const dk=k.slice(2);const {date,...r}=data;next[dk]=r}});
+      pending.forEach((_,id)=>{if(id.startsWith("d-")){const k=id.slice(2);if(days[k])next[k]=days[k]}});
+      if(!keys.length&&local&&local.days){Object.keys(local.days).forEach(k=>{if(hasData(local.days[k])){next[k]=local.days[k];days[k]=local.days[k];saveDay(k)}})}
+      days=next;
+      if(s&&!pending.has("settings")) settings={...DEFAULTS,...s};
+      if(q&&!pending.has("quits")) quits=Array.isArray(q.items)?q.items:[];
+      lsWrite();renderAll();
+    };
+    if(!keys.length){apply({});return}
+    const chunks=[];for(let i=0;i<keys.length;i+=50)chunks.push(keys.slice(i,i+50));
+    const all={};let left=chunks.length;
+    chunks.forEach(ch=>col.getItems(ch,(e,vals)=>{if(!e&&vals)Object.assign(all,vals);if(--left===0)apply(all)}));
+  });
+})();
+function fallback(){clearTimeout(loadTimer);store=null;col=null;$("localNote").hidden=false;setStatus("")}
+})();
+</script>
+</body>
+</html>
